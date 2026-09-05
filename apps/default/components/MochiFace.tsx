@@ -1,9 +1,15 @@
 import { useEffect, useRef, useState } from "react";
-import { Platform, StyleSheet, Text, View } from "react-native";
+import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import Animated, {
+  Easing,
+  cancelAnimation,
   useAnimatedStyle,
   useSharedValue,
+  withDelay,
+  withRepeat,
+  withSequence,
   withSpring,
+  withTiming,
 } from "react-native-reanimated";
 import { DeviceMotion, DeviceMotionMeasurement } from "expo-sensors";
 import * as Haptics from "expo-haptics";
@@ -51,6 +57,10 @@ export interface GReading {
 interface MochiFaceProps {
   paused: boolean;
   cameraWarning: CameraWarning | null;
+  /** GPS speed -- drives the racing helmet + speed streaks. */
+  speedMph?: number | null;
+  /** Debug preview: forces the racing helmet on (web / demo). */
+  forceHelmet?: boolean;
   onExpression?: (name: ExpressionName) => void;
   onG?: (g: GReading) => void;
 }
@@ -58,6 +68,8 @@ interface MochiFaceProps {
 export default function MochiFace({
   paused,
   cameraWarning,
+  speedMph = null,
+  forceHelmet = false,
   onExpression,
   onG,
 }: MochiFaceProps) {
@@ -111,6 +123,17 @@ export default function MochiFace({
   const eyeX = useSharedValue(0);
   const squashX = useSharedValue(1);
   const squashY = useSharedValue(1);
+
+  // Life layer: breathing, blinking, eye darts, expression pop, hops, shake.
+  const breatheV = useSharedValue(0);
+  const blinkV = useSharedValue(1);
+  const dartX = useSharedValue(0);
+  const dartY = useSharedValue(0);
+  const popV = useSharedValue(1);
+  const hopY = useSharedValue(0);
+  const shakeX = useSharedValue(0);
+  const helmetV = useSharedValue(0);
+  const visorV = useSharedValue(0);
 
   // refs for values read inside the 50Hz motion callback
   const settingsRef = useRef(settings);
@@ -211,6 +234,124 @@ export default function MochiFace({
       setExpr("sleepy", true);
     }
   }, [paused]);
+
+  // ---- racing helmet + visor -------------------------------------------------
+  // Helmet on while driving (or debug preview); visor drops when speeding.
+  const helmetOn =
+    !paused && (forceHelmet || (speedMph != null && speedMph >= 8));
+  const visorDown =
+    helmetOn &&
+    (cameraWarning?.over === true || (speedMph != null && speedMph >= 45));
+
+  useEffect(() => {
+    helmetV.value = withSpring(helmetOn ? 1 : 0, {
+      damping: 12,
+      stiffness: 170,
+      mass: 0.9,
+    });
+  }, [helmetOn, helmetV]);
+
+  useEffect(() => {
+    visorV.value = withTiming(visorDown ? 1 : 0, {
+      duration: visorDown ? 260 : 340,
+      easing: visorDown
+        ? Easing.out(Easing.back(1.5))
+        : Easing.inOut(Easing.quad),
+    });
+  }, [visorDown, visorV]);
+
+  // ---- life layer: breathing / blinking / eye darts ---------------------------
+  useEffect(() => {
+    const period = paused ? 2600 : 1500;
+    breatheV.value = withRepeat(
+      withSequence(
+        withTiming(1, { duration: period, easing: Easing.inOut(Easing.quad) }),
+        withTiming(0, { duration: period, easing: Easing.inOut(Easing.quad) }),
+      ),
+      -1,
+      false,
+    );
+    return () => cancelAnimation(breatheV);
+  }, [paused, breatheV]);
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (Math.random() < 0.75) {
+        blinkV.value = withSequence(
+          withTiming(0.08, { duration: 70 }),
+          withTiming(1, { duration: 130 }),
+        );
+      }
+      if (Math.random() < 0.6) {
+        dartX.value = withSequence(
+          withTiming((Math.random() - 0.5) * 8, { duration: 160 }),
+          withDelay(
+            350 + Math.random() * 500,
+            withTiming(0, { duration: 280 }),
+          ),
+        );
+        dartY.value = withSequence(
+          withTiming((Math.random() - 0.5) * 4, { duration: 160 }),
+          withDelay(
+            350 + Math.random() * 500,
+            withTiming(0, { duration: 280 }),
+          ),
+        );
+      }
+    }, 2400);
+    return () => clearInterval(id);
+  }, [blinkV, dartX, dartY]);
+
+  // ---- pop on expression change, hop on bump, shake while panicking -----------
+  useEffect(() => {
+    popV.value = withSequence(
+      withTiming(1.09, { duration: 90 }),
+      withSpring(1, { damping: 9, stiffness: 220 }),
+    );
+    if (expr === "bump") {
+      hopY.value = withSequence(
+        withTiming(-18, { duration: 110, easing: Easing.out(Easing.quad) }),
+        withSpring(0, { damping: 8, stiffness: 200 }),
+      );
+    }
+    if (expr === "panic") {
+      shakeX.value = withRepeat(
+        withSequence(
+          withTiming(2.6, { duration: 45 }),
+          withTiming(-2.6, { duration: 90 }),
+          withTiming(0, { duration: 45 }),
+        ),
+        -1,
+        false,
+      );
+    } else {
+      cancelAnimation(shakeX);
+      shakeX.value = 0;
+    }
+  }, [expr, popV, hopY, shakeX]);
+
+  // Poke: squish, hop, playful face + sfx.
+  const poke = () => {
+    if (paused) return;
+    popV.value = withSequence(
+      withTiming(0.86, { duration: 80 }),
+      withSpring(1, { damping: 7, stiffness: 240 }),
+    );
+    hopY.value = withSequence(
+      withTiming(-10, { duration: 90 }),
+      withSpring(0, { damping: 8, stiffness: 220 }),
+    );
+    const playful: ExpressionName[] = [
+      "giggle",
+      "love",
+      "shocked",
+      "happy",
+      "grin",
+    ];
+    setExpr(playful[Math.floor(Math.random() * playful.length)], true);
+    playSfx("mochi");
+    haptic("light");
+  };
 
   // ---- the 50Hz motion loop --------------------------------------------------
   useEffect(() => {
@@ -335,55 +476,225 @@ export default function MochiFace({
 
   const bodyStyle = useAnimatedStyle(() => ({
     transform: [
-      { translateX: throwX.value },
-      { translateY: throwY.value },
+      { translateX: throwX.value + shakeX.value },
+      { translateY: throwY.value + hopY.value },
       { rotate: `${rot.value}deg` },
-      { scaleX: squashX.value },
-      { scaleY: squashY.value },
+      { scaleX: squashX.value * popV.value * (1 + breatheV.value * 0.02) },
+      { scaleY: squashY.value * popV.value * (1 - breatheV.value * 0.022) },
     ],
   }));
 
   const eyeShiftStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: eyeX.value }],
+    transform: [
+      { translateX: eyeX.value + dartX.value },
+      { translateY: dartY.value },
+      { scaleY: blinkV.value },
+    ],
   }));
+
+  const helmetStyle = useAnimatedStyle(() => ({
+    opacity: helmetV.value,
+    transform: [
+      { translateY: (1 - helmetV.value) * -120 },
+      { rotate: `${(1 - helmetV.value) * -22}deg` },
+    ],
+  }));
+
+  const visorStyle = useAnimatedStyle(() => ({
+    opacity: visorV.value,
+    transform: [{ translateY: (1 - visorV.value) * -46 }],
+  }));
+
+  const fast = !paused && speedMph != null && speedMph >= 30;
+  const sparkly =
+    !paused &&
+    (expr === "love" ||
+      expr === "starstruck" ||
+      expr === "happy" ||
+      expr === "proud" ||
+      expr === "giggle");
 
   return (
     <View style={s.stage}>
+      {fast && (
+        <>
+          <StreakLine top={52} side="l" duration={380} />
+          <StreakLine top={86} side="l" duration={540} />
+          <StreakLine top={120} side="l" duration={460} />
+          <StreakLine top={52} side="r" duration={500} />
+          <StreakLine top={86} side="r" duration={420} />
+          <StreakLine top={120} side="r" duration={600} />
+        </>
+      )}
+      {sparkly && (
+        <>
+          <FloatSparkle x={-52} y={8} size={13} period={1300} glyph="✦" />
+          <FloatSparkle x={48} y={-12} size={10} period={1700} glyph="✧" />
+        </>
+      )}
       {/* The hard offset shadow lives INSIDE the animated wrapper so it
           squashes and throws with the body. */}
-      <Animated.View style={[s.bodyWrap, bodyStyle]}>
-        <View style={[s.shadowBlob, { backgroundColor: cw.shadowColor }]} />
-        <View
-          style={[
-            s.cheekShadow,
-            s.cheekShadowL,
-            { backgroundColor: cw.shadowColor },
-          ]}
-        />
-        <View
-          style={[
-            s.cheekShadow,
-            s.cheekShadowR,
-            { backgroundColor: cw.shadowColor },
-          ]}
-        />
-        <View style={[s.cheek, s.cheekL, { backgroundColor: cw.body }]} />
-        <View style={[s.cheek, s.cheekR, { backgroundColor: cw.body }]} />
-        <View style={[s.body, { backgroundColor: cw.body }]}>
-          <Text style={s.sparkle}>✦</Text>
-          <Animated.View style={[s.eyesRow, eyeShiftStyle]}>
-            <Eye variant={EYE_MAP[expr][0]} ink={ink} side="l" />
-            <Eye variant={EYE_MAP[expr][1]} ink={ink} side="r" />
-          </Animated.View>
-          <View style={s.mouthWrap}>
-            <Mouth variant={MOUTH_MAP[expr]} ink={ink} />
+      <Pressable onPress={poke} accessibilityLabel="Poke mochi">
+        <Animated.View style={[s.bodyWrap, bodyStyle]}>
+          <View style={[s.shadowBlob, { backgroundColor: cw.shadowColor }]} />
+          <View
+            style={[
+              s.cheekShadow,
+              s.cheekShadowL,
+              { backgroundColor: cw.shadowColor },
+            ]}
+          />
+          <View
+            style={[
+              s.cheekShadow,
+              s.cheekShadowR,
+              { backgroundColor: cw.shadowColor },
+            ]}
+          />
+          <View style={[s.cheek, s.cheekL, { backgroundColor: cw.body }]} />
+          <View style={[s.cheek, s.cheekR, { backgroundColor: cw.body }]} />
+          <View style={[s.body, { backgroundColor: cw.body }]}>
+            <Text style={s.sparkle}>✦</Text>
+            <Animated.View style={[s.eyesRow, eyeShiftStyle]}>
+              <Eye variant={EYE_MAP[expr][0]} ink={ink} side="l" />
+              <Eye variant={EYE_MAP[expr][1]} ink={ink} side="r" />
+            </Animated.View>
+            <View style={s.mouthWrap}>
+              <Mouth variant={MOUTH_MAP[expr]} ink={ink} />
+            </View>
+            <View style={[s.blush, s.blushL]} />
+            <View style={[s.blush, s.blushR]} />
           </View>
-          <View style={[s.blush, s.blushL]} />
-          <View style={[s.blush, s.blushR]} />
-        </View>
-      </Animated.View>
+          {/* Racing helmet: drops on while driving, visor slides down when
+              speeding. Painted last so it sits over the face. */}
+          <Animated.View
+            style={[s.helmet, helmetStyle]}
+            pointerEvents="none"
+          >
+            <View style={[s.helmetDome, { backgroundColor: HELMET_SHELL }]} />
+            <View style={[s.helmetStripe, { backgroundColor: cw.body }]} />
+            <View style={[s.helmetRim, { backgroundColor: cw.shadowColor }]} />
+            <View
+              style={[
+                s.helmetPod,
+                s.helmetPodL,
+                { backgroundColor: cw.shadowColor },
+              ]}
+            />
+            <View
+              style={[
+                s.helmetPod,
+                s.helmetPodR,
+                { backgroundColor: cw.shadowColor },
+              ]}
+            />
+            <Text style={[s.helmetStar, { color: cw.shadowColor }]}>✦</Text>
+            <Animated.View style={[s.visor, visorStyle]}>
+              <View style={s.visorShine} />
+            </Animated.View>
+          </Animated.View>
+        </Animated.View>
+      </Pressable>
       <View style={s.ground} />
     </View>
+  );
+}
+
+// Speed streaks: little motion lines rushing toward mochi at speed.
+function StreakLine({
+  top,
+  side,
+  duration,
+}: {
+  top: number;
+  side: "l" | "r";
+  duration: number;
+}) {
+  const v = useSharedValue(0);
+  useEffect(() => {
+    v.value = withRepeat(
+      withSequence(
+        withTiming(1, { duration, easing: Easing.out(Easing.quad) }),
+        withTiming(0, { duration: 0 }),
+      ),
+      -1,
+      false,
+    );
+    return () => cancelAnimation(v);
+  }, [v, duration]);
+  const st = useAnimatedStyle(() => ({
+    opacity: (1 - v.value) * 0.45,
+    transform: [
+      { translateX: (side === "l" ? 1 : -1) * (1 - v.value) * 26 },
+    ],
+  }));
+  return (
+    <Animated.View
+      style={[
+        {
+          position: "absolute",
+          top,
+          ...(side === "l" ? { left: 16 } : { right: 16 }),
+          width: 30,
+          height: 6,
+          borderRadius: 3,
+          backgroundColor: color.mutedForeground,
+        },
+        st,
+      ]}
+    />
+  );
+}
+
+// Floating sparkle particle for the giddy expressions.
+function FloatSparkle({
+  x,
+  y,
+  size,
+  period,
+  glyph,
+}: {
+  x: number;
+  y: number;
+  size: number;
+  period: number;
+  glyph: string;
+}) {
+  const v = useSharedValue(0);
+  useEffect(() => {
+    v.value = withRepeat(
+      withSequence(
+        withTiming(1, { duration: period, easing: Easing.inOut(Easing.quad) }),
+        withTiming(0, { duration: period, easing: Easing.inOut(Easing.quad) }),
+      ),
+      -1,
+      false,
+    );
+    return () => cancelAnimation(v);
+  }, [v, period]);
+  const st = useAnimatedStyle(() => ({
+    opacity: 0.35 + v.value * 0.65,
+    transform: [
+      { translateY: -6 - v.value * 10 },
+      { scale: 0.7 + v.value * 0.5 },
+    ],
+  }));
+  return (
+    <Animated.Text
+      style={[
+        {
+          position: "absolute",
+          top: 36 + y,
+          left: "50%",
+          marginLeft: x,
+          fontSize: size,
+          color: color.chart2,
+        },
+        st,
+      ]}
+    >
+      {glyph}
+    </Animated.Text>
   );
 }
 
@@ -594,6 +905,7 @@ function Mouth({ variant, ink }: { variant: MouthVariant; ink: string }) {
 // ---- styles ------------------------------------------------------------------
 
 const BODY = 144;
+const HELMET_SHELL = "#FFF6EC";
 
 const s = StyleSheet.create({
   stage: {
@@ -679,6 +991,75 @@ const s = StyleSheet.create({
     height: 13,
     borderRadius: 7,
     backgroundColor: "rgba(51, 43, 43, 0.08)",
+  },
+  helmet: {
+    position: "absolute",
+    top: -16,
+    left: -11,
+    width: BODY + 22,
+    height: 92,
+  },
+  helmetDome: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    width: BODY + 22,
+    height: 86,
+    borderTopLeftRadius: 80,
+    borderTopRightRadius: 80,
+    borderBottomLeftRadius: 34,
+    borderBottomRightRadius: 34,
+  },
+  helmetStripe: {
+    position: "absolute",
+    top: 3,
+    left: (BODY + 22) / 2 - 9,
+    width: 18,
+    height: 80,
+    borderRadius: 9,
+  },
+  helmetRim: {
+    position: "absolute",
+    bottom: 2,
+    left: 2,
+    right: 2,
+    height: 12,
+    borderRadius: 7,
+  },
+  helmetPod: {
+    position: "absolute",
+    top: 54,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+  },
+  helmetPodL: { left: -2 },
+  helmetPodR: { right: -2 },
+  helmetStar: {
+    position: "absolute",
+    top: 16,
+    right: 26,
+    fontSize: 13,
+  },
+  visor: {
+    position: "absolute",
+    top: 46,
+    left: 11,
+    width: BODY,
+    height: 38,
+    borderRadius: 16,
+    backgroundColor: "rgba(23, 25, 36, 0.5)",
+    overflow: "hidden",
+  },
+  visorShine: {
+    position: "absolute",
+    top: 6,
+    left: 14,
+    width: 46,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "rgba(255, 255, 255, 0.55)",
+    transform: [{ rotate: "-8deg" }],
   },
 });
 

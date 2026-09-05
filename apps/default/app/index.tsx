@@ -168,6 +168,8 @@ export default function HomeScreen() {
               <MochiFace
                 paused={paused}
                 cameraWarning={warning}
+                speedMph={speedMph}
+                forceHelmet={settings.debugHud}
                 onExpression={setExpr}
                 onG={settings.debugHud ? setG : undefined}
               />
