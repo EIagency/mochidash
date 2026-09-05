@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
+  Linking,
   Platform,
   Pressable,
   ScrollView,
@@ -52,6 +53,11 @@ export default function HomeScreen() {
   const [battery, setBattery] = useState<number | null>(null);
 
   const { warning, speedMph } = useSpeedCameras(settings.cameraWarnings);
+
+  const openMaps = useCallback(() => {
+    // Universal URL: opens the Google Maps app when installed, else the web app
+    Linking.openURL("https://www.google.com/maps").catch(() => {});
+  }, []);
 
   // Clock tick -- also drives the night-dim check.
   useEffect(() => {
@@ -257,16 +263,22 @@ export default function HomeScreen() {
               )}
             </View>
           ) : (
-            <View style={s.alertCard}>
+            <Pressable
+              style={({ pressed }) => [s.alertCard, pressed && s.pressed]}
+              onPress={openMaps}
+              accessibilityRole="link"
+              accessibilityLabel="Open Google Maps"
+            >
               <View style={[s.alertIconWrap, s.alertIconWrapDefault]}>
                 <IconNav size={24} color={color.mutedForeground} />
               </View>
               <View style={s.flex}>
                 <Text style={s.alertTitle}>Next turn</Text>
                 <Text style={s.alertSub}>Head onto the A3022</Text>
+                <Text style={s.alertLink}>Open Google Maps ›</Text>
               </View>
               <Text style={s.alertRight}>0.4 mi</Text>
-            </View>
+            </Pressable>
           )}
         </ScrollView>
       </SafeAreaView>
@@ -526,6 +538,15 @@ const s = StyleSheet.create({
     fontSize: 13,
     color: color.mutedForeground,
     marginTop: 1,
+  },
+  alertLink: {
+    fontFamily: font.bodyBold,
+    fontSize: 12,
+    color: color.primary,
+    marginTop: 3,
+  },
+  pressed: {
+    opacity: 0.7,
   },
   alertRight: {
     fontFamily: font.heading,
