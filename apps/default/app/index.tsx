@@ -101,16 +101,8 @@ export default function HomeScreen() {
       ? `Speed camera in ${Math.round(warning.distanceM)} m`
       : `Mochi is feeling ${STATUS_FLAVOR[expr]}`;
 
-  const showSpeed = speedMph > 4;
   const hour = now.getHours();
   const isNight = hour >= 19 || hour < 7;
-  const hh = String(now.getHours()).padStart(2, "0");
-  const mm = String(now.getMinutes()).padStart(2, "0");
-  const dateStr = now.toLocaleDateString(undefined, {
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-  });
 
   return (
     <View style={s.root}>
@@ -219,30 +211,18 @@ export default function HomeScreen() {
             </View>
             <View style={[s.tile, s.flex]}>
               <View style={s.tileIconRow}>
-                {showSpeed ? (
-                  <IconGauge size={22} color={color.mutedForeground} />
-                ) : (
-                  <IconClock size={22} color={color.mutedForeground} />
-                )}
-                <Text style={s.tileLabel}>{showSpeed ? "Speed" : "Clock"}</Text>
+                <IconGauge size={22} color={color.mutedForeground} />
+                <Text style={s.tileLabel}>Speed</Text>
               </View>
-              <Text style={s.tileValue}>
-                {showSpeed ? `${Math.round(speedMph)}` : `${hh}:${mm}`}
-              </Text>
+              <Text style={s.tileValue}>{Math.round(speedMph)}</Text>
               <Text style={s.tileSub}>
-                {showSpeed ? (
-                  <>
-                    mph · Score{" "}
-                    <Text style={scoreTextStyle(driving.score)}>
-                      {driving.score}
-                    </Text>
-                    {driving.harshBrakes > 0
-                      ? ` · ${driving.harshBrakes} harsh ${driving.harshBrakes === 1 ? "brake" : "brakes"}`
-                      : ""}
-                  </>
-                ) : (
-                  dateStr
-                )}
+                mph · Score{" "}
+                <Text style={scoreTextStyle(driving.score)}>
+                  {driving.score}
+                </Text>
+                {driving.harshBrakes > 0
+                  ? ` · ${driving.harshBrakes} harsh ${driving.harshBrakes === 1 ? "brake" : "brakes"}`
+                  : ""}
               </Text>
             </View>
           </View>
