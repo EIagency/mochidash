@@ -40,6 +40,7 @@ import {
 } from "@/lib/expressions";
 import { color, font, radius, shadow } from "@/lib/theme";
 import { useSpeedCameras } from "@/hooks/useSpeedCameras";
+import { useDrivingScore } from "@/hooks/useDrivingScore";
 
 export default function HomeScreen() {
   useKeepAwake();
@@ -53,6 +54,7 @@ export default function HomeScreen() {
   const [battery, setBattery] = useState<number | null>(null);
 
   const { warning, speedMph } = useSpeedCameras(settings.cameraWarnings);
+  const driving = useDrivingScore(speedMph);
 
   const openMaps = useCallback(() => {
     // Universal URL: opens the Google Maps app when installed, else the web app
@@ -228,7 +230,19 @@ export default function HomeScreen() {
                 {showSpeed ? `${Math.round(speedMph)}` : `${hh}:${mm}`}
               </Text>
               <Text style={s.tileSub}>
-                {showSpeed ? "mph · GPS" : dateStr}
+                {showSpeed ? (
+                  <>
+                    mph · Score{" "}
+                    <Text style={scoreTextStyle(driving.score)}>
+                      {driving.score}
+                    </Text>
+                    {driving.harshBrakes > 0
+                      ? ` · ${driving.harshBrakes} harsh ${driving.harshBrakes === 1 ? "brake" : "brakes"}`
+                      : ""}
+                  </>
+                ) : (
+                  dateStr
+                )}
               </Text>
             </View>
           </View>
@@ -327,6 +341,11 @@ function HudRow({
       <Text style={s.hudValue}>{value.toFixed(2)}g</Text>
     </View>
   );
+}
+
+function scoreTextStyle(score: number) {
+  const c = score >= 80 ? "#3D8B5F" : score >= 60 ? "#D99413" : "#D93D3D";
+  return { fontFamily: font.bodyBold, fontSize: 12, color: c };
 }
 
 const s = StyleSheet.create({
